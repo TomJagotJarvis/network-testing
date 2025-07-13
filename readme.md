@@ -76,7 +76,6 @@ python wifi_test.py --room living_room_sofa --runs 10 --wait 1
 From the same directory as `index.html` and `wifi_results.csv`, run:
 
 ```
-bash
 python -m http.server
 ```
 
@@ -100,7 +99,7 @@ http://localhost:8000
 ## 📁 Recommended Project Structure
 
 ```
-wifi-testing/
+network-testing/
 ├── wifi_test.py
 ├── wifi_results.db
 ├── wifi_results.csv
