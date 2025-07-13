@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WiFi Test Results</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            max-width: 900px;
+            margin: 2rem auto;
+            padding: 1rem;
+        }
+
+        h2,
+        h3 {
+            text-align: center;
+        }
+
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .controls label {
+            margin: 0 10px;
+        }
+
+        .presets {
+            margin-top: 10px;
+        }
+
+        .presets button {
+            margin: 0 5px;
+            padding: 5px 10px;
+        }
+
+        canvas {
+            margin: 20px auto;
+            display: block;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 30px;
+        }
+
+        th,
+        td {
+            border: 1px solid #ccc;
+            padding: 10px;
+            text-align: center;
+        }
+
+        th {
+            background-color: #f4f4f4;
+            cursor: pointer;
+            position: relative;
+            padding-right: 20px;
+        }
+
+        th::after {
+            content: " ";
+            position: absolute;
+            right: 8px;
+            font-size: 0.8em;
+            color: #333;
+            pointer-events: none;
+        }
+
+        th.sort-asc::after {
+            content: "▲";
+        }
+
+        th.sort-desc::after {
+            content: "▼";
+        }
+    </style>
+</head>
+
+<body>
+    <h2>WiFi Performance by Room (Average)</h2>
+    <div class="controls">
+        <label>From: <input type="datetime-local" id="fromDate" /></label>
+        <label>To: <input type="datetime-local" id="toDate" /></label>
+        <button onclick="applyFilter()">Apply Filter</button>
+        <label><input type="checkbox" id="percentileToggle" onchange="updateDisplayMode()" /> Show 95th
+            Percentile</label>
+        <div class="presets">
+            <button onclick="setPreset('today')">Today</button>
+            <button onclick="setPreset('last7')">Last 7 Days</button>
+            <button onclick="setPreset('all')">All Time</button>
+        </div>
+    </div>
+    <canvas id="wifiChart" width="800" height="400"></canvas>
+    <h3>Average WiFi Metrics by Room</h3>
+    <table id="resultsTable">
+        <thead>
+            <tr>
+                <th onclick="sortTable(0)">Room</th>
+                <th onclick="sortTable(1)"># Results</th>
+                <th onclick="sortTable(2)">Avg Latency (ms)</th>
+                <th onclick="sortTable(3)">Avg Download (Mbps)</th>
+                <th onclick="sortTable(4)">Avg Upload (Mbps)</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+    <script>
+        let rawData = [];
+        let currentSortColumn = -1;
+        let sortAscending = true;
+        let showPercentile = false;
+        let minDate, maxDate;
+
+        function parseCSV(data) {
+            const lines = data.trim().split("\n");
+            const headers = lines[0].split(",");
+            return lines.slice(1).map(line => {
+                const obj = {};
+                line.split(",").forEach((value, idx) => {
+                    obj[headers[idx]] = isNaN(value) ? value : Number(value);
+                });
+                obj.timestamp = new Date(obj.timestamp);
+                return obj;
+            });
+        }
+
+        function computeStats(data) {
+            const grouped = {};
+            data.forEach(row => {
+                if (!grouped[row.room]) grouped[row.room] = [];
+                grouped[row.room].push(row);
+            });
+            const stats = [];
+            for (let room in grouped) {
+                const rows = grouped[room];
+                const latencies = rows.map(r => r.local_latency_ms).sort((a, b) => a - b);
+                const downloads = rows.map(r => r.internet_download_mbps).sort((a, b) => a - b);
+                const uploads = rows.map(r => r.internet_upload_mbps).sort((a, b) => a - b);
+                const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+                const p95 = arr => arr[Math.floor(arr.length * 0.95) - 1];
+                stats.push({
+                    room,
+                    count: rows.length,
+                    latency: showPercentile ? p95(latencies) : avg(latencies),
+                    download: showPercentile ? p95(downloads) : avg(downloads),
+                    upload: showPercentile ? p95(uploads) : avg(uploads)
+                });
+            }
+            return stats;
+        }
+
+        function renderTable(stats) {
+            const tbody = document.querySelector("#resultsTable tbody");
+            tbody.innerHTML = "";
+            stats.forEach(stat => {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+          <td>${stat.room}</td>
+          <td>${stat.count}</td>
+          <td>${stat.latency.toFixed(2)}</td>
+          <td>${stat.download.toFixed(2)}</td>
+          <td>${stat.upload.toFixed(2)}</td>`;
+                tbody.appendChild(row);
+            });
+        }
+
+        function sortTable(colIdx) {
+            const table = document.querySelector("#resultsTable");
+            const ths = table.querySelectorAll("th");
+            if (currentSortColumn === colIdx) sortAscending = !sortAscending;
+            else {
+                sortAscending = true;
+                if (currentSortColumn !== -1) ths[currentSortColumn].classList.remove("sort-asc", "sort-desc");
+                currentSortColumn = colIdx;
+            }
+            ths[colIdx].classList.toggle("sort-asc", sortAscending);
+            ths[colIdx].classList.toggle("sort-desc", !sortAscending);
+            const rows = Array.from(table.querySelector("tbody").rows);
+            rows.sort((a, b) => {
+                const valA = a.cells[colIdx].innerText;
+                const valB = b.cells[colIdx].innerText;
+                const numA = parseFloat(valA);
+                const numB = parseFloat(valB);
+                return (isNaN(numA) || isNaN(numB) ? valA.localeCompare(valB) : numA - numB) * (sortAscending ? 1 : -1);
+            });
+            rows.forEach(row => table.querySelector("tbody").appendChild(row));
+        }
+
+        let chart;
+        function renderChart(stats) {
+            const ctx = document.getElementById("wifiChart").getContext("2d");
+            if (chart) chart.destroy();
+            chart = new Chart(ctx, {
+                type: "bar",
+                data: {
+                    labels: stats.map(s => s.room),
+                    datasets: [
+                        { label: "Latency (ms)", data: stats.map(s => s.latency), yAxisID: 'y1' },
+                        { label: "Download (Mbps)", data: stats.map(s => s.download), yAxisID: 'y2' },
+                        { label: "Upload (Mbps)", data: stats.map(s => s.upload), yAxisID: 'y2' }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y1: { type: 'linear', position: 'left', title: { display: true, text: 'Latency (ms)' } },
+                        y2: { type: 'linear', position: 'right', title: { display: true, text: 'Speed (Mbps)' }, grid: { drawOnChartArea: false } }
+                    }
+                }
+            });
+        }
+
+        function updateDisplayMode() {
+            showPercentile = document.getElementById("percentileToggle").checked;
+            applyFilter();
+        }
+
+        function toLocalDatetimeString(date) {
+            const pad = num => num.toString().padStart(2, '0');
+            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        }
+
+        function applyFilter() {
+            const from = new Date(document.getElementById("fromDate").value);
+            const to = new Date(document.getElementById("toDate").value);
+            to.setSeconds(59);
+            to.setMilliseconds(999);
+            const filtered = rawData.filter(row => row.timestamp >= from && row.timestamp <= to);
+            const stats = computeStats(filtered);
+            renderTable(stats);
+            renderChart(stats);
+        }
+
+        function setPreset(option) {
+            const fromInput = document.getElementById("fromDate");
+            const toInput = document.getElementById("toDate");
+            const now = new Date();
+            if (option === "today") {
+                const start = new Date();
+                start.setHours(0, 0, 0, 0);
+                const end = new Date();
+                end.setHours(23, 59, 59, 999);
+                fromInput.value = toLocalDatetimeString(start);
+                toInput.value = toLocalDatetimeString(end);
+            } else if (option === "last7") {
+                const start = new Date();
+                start.setDate(start.getDate() - 6);
+                start.setHours(0, 0, 0, 0);
+                const end = new Date();
+                end.setHours(23, 59, 59, 999);
+                fromInput.value = toLocalDatetimeString(start);
+                toInput.value = toLocalDatetimeString(end);
+            } else if (option === "all") {
+                fromInput.value = toLocalDatetimeString(minDate);
+                toInput.value = toLocalDatetimeString(maxDate);
+            }
+            applyFilter();
+        }
+
+        fetch("wifi_results.csv")
+            .then(response => response.text())
+            .then(csv => {
+                rawData = parseCSV(csv);
+                const timestamps = rawData.map(r => r.timestamp).sort((a, b) => a - b);
+                minDate = new Date(timestamps[0]);
+                maxDate = new Date(timestamps[timestamps.length - 1]);
+                minDate.setHours(0, 0);
+                maxDate.setHours(23, 59);
+                document.getElementById("fromDate").value = toLocalDatetimeString(minDate);
+                document.getElementById("toDate").value = toLocalDatetimeString(maxDate);
+                applyFilter();
+            });
+    </script>
+</body>
+
+</html>

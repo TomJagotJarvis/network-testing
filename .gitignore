@@ -1,0 +1,33 @@
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# VS Code settings
+.vscode/
+*.code-workspace
+
+# Python virtual environments
+venv/
+.venv/
+ENV/
+env/
+*.pyc
+__pycache__/
+
+# SQLite DB and CSV data exports
+*.db
+*.csv
+
+# Logs and runtime files
+*.log
+
+# pyenv or pipenv
+.python-version
+Pipfile.lock
+
+# Backup/swap/temp files
+*~
+*.swp
+*.tmp
+*.bak
